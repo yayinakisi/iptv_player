@@ -76,8 +76,9 @@ class XtreamDialog(QDialog):
 class SeekSlider(QSlider):
     def __init__(self, player, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setTracking(False)
         self.player = player
+        self.setTracking(False)
+        
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -89,9 +90,9 @@ class SeekSlider(QSlider):
         if event.buttons() == Qt.LeftButton:
             value = self.pixelPosToRangeValue(event.pos())
             self.setValue(value)
+            self.player.update_time_labels_while_seeking(value)  # Call the method with the value
             event.accept()
 
-            self.player.update_time_labels_while_seeking(value)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -262,7 +263,7 @@ class IPTVPlayer(QMainWindow):
         self.elapsed_time_label.setFont(QFont("Arial", 12))
         controls_layout.addWidget(self.elapsed_time_label)
 
-        self.positionSlider = SeekSlider(self, Qt.Horizontal)
+        self.positionSlider = SeekSlider(self, orientation=Qt.Horizontal)
         self.positionSlider.sliderReleased.connect(self.set_media_position)
         self.positionSlider.sliderReleased.connect(self.set_media_position)
         self.positionSlider.sliderMoved.connect(self.update_time_labels)
