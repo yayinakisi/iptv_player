@@ -12,6 +12,7 @@ from PyQt5.QtCore import QTimer
 class PlaylistManager:
     def __init__(self):
         self.channels = []
+        self.categories = []
 
     def load_m3u_from_file(self, file_path: str):
         try:
@@ -63,9 +64,6 @@ class PlaylistManager:
 
                 # Process the categories and channels
                 self.process_xtream_categories_and_channels(live_categories, vod_categories, series_categories, server_url, username, password)
-
-
-
             else:
                 print("Error: Xtream account is not active or invalid.")
 
@@ -74,12 +72,9 @@ class PlaylistManager:
         except Exception as e:
             print(f"Error while processing Xtream content: {e}")
 
-
-
-
     def parse_m3u(self, m3u_content):
         channels = []
-        current_group = None
+        categories_dict = {}  # Create a dictionary to store categories
 
         for line in m3u_content.splitlines():
             line = line.strip()
@@ -96,6 +91,9 @@ class PlaylistManager:
 
                 if group_match:
                     current_group = group_match.group(1)
+                    # Add the group to the dictionary if it's not already there
+                    if current_group not in categories_dict:
+                        categories_dict[current_group] = []
 
                 channel = {
                     "name": name_match.group(1) if name_match else "",
@@ -104,12 +102,17 @@ class PlaylistManager:
                     "tvg_id": tvgid_match.group(1) if tvgid_match else "",
                 }
                 channels.append(channel)
+                # Add the channel to the corresponding group
+                if current_group in categories_dict:
+                    categories_dict[current_group].append(channel)
 
             elif line.startswith("http"):
                 # Add the stream URL to the last channel
                 channels[-1]["url"] = line
 
         self.channels = channels
+        self.categories = [{"name": group, "channels": channels} for group, channels in categories_dict.items()]
+
 
     def parse_epg(self, epg_content):
         epg = {}
@@ -271,6 +274,8 @@ class PlaylistManager:
     def get_channels(self):
         return self.channels
 
+    def get_categories(self):  # Add this method
+        return self.categories
 
 class Channel:
     def __init__(self, name: str, url: str, logo: str, epg_data: List[dict]):

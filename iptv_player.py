@@ -1,14 +1,16 @@
 import sys
 import vlc
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QAction, QVBoxLayout, QHBoxLayout, QSplitter, QTreeView, QListView, QLabel,
-                             QFrame, QTextBrowser, QSlider, QStatusBar, QSizePolicy, QTimeEdit, QLabel, QInputDialog, QFileDialog,
-                             QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QSpinBox, QDoubleSpinBox, QListWidget, QMessageBox)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QAction, QVBoxLayout, QHBoxLayout, QSplitter, QTreeView, QListView, QLabel, QStyle,
+                             QFrame, QTextBrowser, QSlider, QStatusBar, QSizePolicy, QTimeEdit, QLabel, QInputDialog, QFileDialog, QToolButton, QStyleOptionSlider,
+                             QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QSpinBox, QDoubleSpinBox, QListWidget, QMessageBox, QPushButton, QComboBox)
 from PyQt5.QtCore import Qt, QTime, QTimer
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QSettings
 from playlist_manager import PlaylistManager
 from epg_manager import EPGManager
 from PyQt5.QtWidgets import QListWidgetItem
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtWidgets import QSlider
 
 
 class SettingsDialog(QDialog):
@@ -70,6 +72,47 @@ class XtreamDialog(QDialog):
         layout.addRow(button_box)
         self.setLayout(layout)
 
+class SeekSlider(QSlider):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setTracking(False)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            value = self.pixelPosToRangeValue(event.pos())
+            self.setValue(value)
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            value = self.pixelPosToRangeValue(event.pos())
+            self.setValue(value)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            value = self.pixelPosToRangeValue(event.pos())
+            self.setValue(value)
+            event.accept()
+
+    def pixelPosToRangeValue(self, pos):
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        gr = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
+        sr = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+
+        if self.orientation() == Qt.Horizontal:
+            slider_length = sr.width()
+            slider_min = gr.x()
+            slider_max = gr.right() - slider_length + 1
+        else:
+            slider_length = sr.height()
+            slider_min = gr.y()
+            slider_max = gr.bottom() - slider_length + 1
+
+        pr = pos - sr.center() + sr.topLeft()
+        p = pr.x() if self.orientation() == Qt.Horizontal else pr.y()
+        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), p - slider_min, slider_max - slider_min, opt.upsideDown)
 
 class IPTVPlayer(QMainWindow):
     def __init__(self):
@@ -78,7 +121,8 @@ class IPTVPlayer(QMainWindow):
 
         self.playlist_manager = PlaylistManager()
         self.epg_manager = EPGManager()
-
+        
+        self.channel_list = QListWidget() 
         self.load_settings()
 
         # Menu bar
@@ -121,18 +165,28 @@ class IPTVPlayer(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        # First part: Groups and Channels
-        self.channel_list = QListWidget()  # Create the channel_list attribute here
+        # First part: Categories and Channels
+        self.group_list = QListWidget()
+        self.group_list.setFont(QFont("Arial", 12))
+        splitter.addWidget(self.group_list)
+        self.group_list.itemClicked.connect(self.update_channel_list)
+
+        # Second part: Channels
         self.channel_list.setFont(QFont("Arial", 12))
         splitter.addWidget(self.channel_list)
+        self.channel_list.itemDoubleClicked.connect(self.play_channel)
 
-        # Second part: EPG Information
-        epg_info = QListView()
-        epg_info.setFont(QFont("Arial", 12))
+        # Third part: EPG Information
+        epg_info = QFrame()
+        epg_layout = QVBoxLayout(epg_info)
+        epg_layout.setContentsMargins(0, 0, 0, 0)
         splitter.addWidget(epg_info)
-        
-        # EPG labels
-        epg_layout = QVBoxLayout()
+
+        # Add the following lines to create the new QListWidget
+        self.epg_all_programs_list = QListWidget()
+        self.epg_all_programs_list.setFont(QFont("Arial", 12))
+        epg_layout.addWidget(self.epg_all_programs_list)
+
         self.epg_now_label = QLabel()
         self.epg_now_label.setFont(QFont("Arial", 12))
         epg_layout.addWidget(self.epg_now_label)
@@ -149,9 +203,7 @@ class IPTVPlayer(QMainWindow):
         self.epg_next_time_label.setFont(QFont("Arial", 12))
         epg_layout.addWidget(self.epg_next_time_label)
 
-        epg_info.setLayout(epg_layout)
-
-        # Third part: Player and EPG data of the current program
+        # Fourth part: Player and EPG data of the current program
         player_layout = QVBoxLayout()
 
         self.player_label = QLabel()
@@ -161,7 +213,7 @@ class IPTVPlayer(QMainWindow):
         player_layout.addWidget(self.player_label)
 
         # Initialize the VLC player
-        self.vlc_instance = vlc.Instance()
+        self.vlc_instance = vlc.Instance('--no-xlib')
         self.vlc_player = self.vlc_instance.media_player_new()
 
         # Connect the channel list click event to the play_channel function
@@ -175,17 +227,48 @@ class IPTVPlayer(QMainWindow):
         # Player controls
         controls_layout = QHBoxLayout()
 
-        play_button = QLabel()
-        play_button.setPixmap(self.style().standardIcon(self.style().SP_MediaPlay).pixmap(32, 32))
+        play_button = QToolButton()
+        play_button.setIcon(self.style().standardIcon(self.style().SP_MediaPlay))
+        play_button.clicked.connect(self.play)
         controls_layout.addWidget(play_button)
 
-        pause_button = QLabel()
-        pause_button.setPixmap(self.style().standardIcon(self.style().SP_MediaPause).pixmap(32, 32))
+        pause_button = QToolButton()
+        pause_button.setIcon(self.style().standardIcon(self.style().SP_MediaPause))
+        pause_button.clicked.connect(self.pause)
         controls_layout.addWidget(pause_button)
 
-        stop_button = QLabel()
-        stop_button.setPixmap(self.style().standardIcon(self.style().SP_MediaStop).pixmap(32, 32))
+        stop_button = QToolButton()
+        stop_button.setIcon(self.style().standardIcon(self.style().SP_MediaStop))
+        stop_button.clicked.connect(self.stop)
         controls_layout.addWidget(stop_button)
+
+        prev_channel_button = QToolButton()
+        prev_channel_button.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        prev_channel_button.clicked.connect(self.prev_channel)
+        controls_layout.addWidget(prev_channel_button)
+
+        next_channel_button = QToolButton()
+        next_channel_button.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        next_channel_button.clicked.connect(self.next_channel)
+        controls_layout.addWidget(next_channel_button)
+
+        self.elapsed_time_label = QLabel('00:00')
+        self.elapsed_time_label.setFont(QFont("Arial", 12))
+        controls_layout.addWidget(self.elapsed_time_label)
+
+        self.progress_bar = SeekSlider(Qt.Horizontal)
+        self.progress_bar.setFixedHeight(32)
+        controls_layout.addWidget(self.progress_bar)
+        self.progress_bar.sliderMoved.connect(self.seek)
+
+        self.remaining_time_label = QLabel('-00:00')
+        self.remaining_time_label.setFont(QFont("Arial", 12))
+        controls_layout.addWidget(self.remaining_time_label)
+
+        # Fullscreen toggle button
+        self.fullscreen_button = QPushButton("Toggle Fullscreen", self)
+        controls_layout.addWidget(self.fullscreen_button)
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
 
         elapsed_time_label = QLabel('00:00')
         elapsed_time_label.setFont(QFont("Arial", 12))
@@ -207,7 +290,7 @@ class IPTVPlayer(QMainWindow):
         volume_slider.setFixedHeight(32)
         volume_slider.setRange(0, 100)
         volume_slider.setValue(100)
-        volume_slider.valueChanged.connect(self.update_volume_percentage)
+        volume_slider.valueChanged.connect(self.set_volume)
         controls_layout.addWidget(volume_slider)
 
         self.volume_percentage = QLabel('100%')
@@ -227,12 +310,9 @@ class IPTVPlayer(QMainWindow):
         player_frame.setLayout(player_layout)
         splitter.addWidget(player_frame)
 
-        splitter.setSizes([1, 1, 1])
-
+        splitter.setSizes([20, 20, 30, 30])
         self.setGeometry(100, 100, 1600, 1200)
 
-    def update_volume_percentage(self, value):
-        self.volume_percentage.setText(f"{value}%")
 
     def on_open_m3u_url(self):
         url, ok = QInputDialog.getText(self, 'Open m3u URL', 'Enter the m3u URL:')
@@ -324,16 +404,23 @@ class IPTVPlayer(QMainWindow):
             self.save_settings()
             self.load_settings()
 
-    def update_channel_list(self):
+    def update_channel_list(self, group_item):
         self.channel_list.clear()
-        for channel in self.playlist_manager.get_channels():
-            item = QListWidgetItem(channel["name"])
-            item.setData(Qt.UserRole, channel)
-            self.channel_list.addItem(item)
+        category = group_item.data(Qt.UserRole)
+        channels = category["channels"]
+        for channel in channels:
+            channel_item = QListWidgetItem("  " + channel["name"])
+            channel_item.setData(Qt.UserRole, channel)
+            self.channel_list.addItem(channel_item)
+
 
     def update_gui(self):
-        self.update_channel_list()
-        # self.update_epg_data()
+        self.group_list.clear()
+        categories = self.playlist_manager.get_categories()
+        for category in categories:
+            group_item = QListWidgetItem(category["name"])
+            group_item.setData(Qt.UserRole, category)
+            self.group_list.addItem(group_item)
 
     def play_channel(self, item):
         channel = item.data(Qt.UserRole)
@@ -341,17 +428,17 @@ class IPTVPlayer(QMainWindow):
         self.vlc_player.set_media(media)
         self.vlc_player.play()
 
-        # Set the video widget to the player
+        # Set the custom video widget (QVideoWidget) to the VLC player
         self.vlc_player.set_fullscreen(True)
         self.vlc_player.video_set_scale(0)
-        self.vlc_player.set_hwnd(self.player_label.winId())
+        self.vlc_player.set_hwnd(int(self.player_label.winId()))
 
-        # Update EPG data
-        self.update_epg_data(channel)
+        # Connect the endReached signal to the update_time_labels method
+        self.vlc_player.event_manager().event_attach(vlc.EventType.MediaPlayerEndReached, self.update_time_labels)
+
 
     def update_epg_data(self, channel):
-        current_program = self.epg_manager.get_current_program(channel["tvg_id"])
-        upcoming_programs = self.epg_manager.get_upcoming_programs(channel["tvg_id"])
+        current_program, next_program, all_programs = self.epg_manager.get_current_next_all_programs(channel["tvg_id"])
 
         if current_program:
             self.epg_now_label.setText(current_program['title'])
@@ -366,15 +453,90 @@ class IPTVPlayer(QMainWindow):
             self.epg_now_time_label.setText("")
             self.epg_data.setPlainText("No EPG data available")
 
-        if upcoming_programs:
-            self.epg_upcoming_list.clear()
-            for program in upcoming_programs:
-                start_time = program['start_time'].strftime('%H:%M')
-                end_time = program['end_time'].strftime('%H:%M')
-                self.epg_upcoming_list.append(f"{start_time} - {end_time} {program['title']}")
+        if next_program:
+            self.epg_next_label.setText(next_program['title'])
+            start_time = next_program['start_time'].strftime('%H:%M')
+            end_time = next_program['end_time'].strftime('%H:%M')
+            self.epg_next_time_label.setText(f"{start_time} - {end_time}")
         else:
-            self.epg_upcoming_list.clear()
-            self.epg_upcoming_list.append("No EPG data available")
+            self.epg_next_label.setText("No EPG data available")
+            self.epg_next_time_label.setText("")
+
+        if all_programs:
+            self.epg_all_programs_list.clear()
+            for program in all_programs:
+                program_item = QListWidgetItem(program)
+                self.epg_all_programs_list.addItem(program_item)
+        else:
+            self.epg_all_programs_list.clear()
+            no_epg_item = QListWidgetItem("No EPG data available")
+            self.epg_all_programs_list.addItem(no_epg_item)
+
+    def play(self):
+        if self.vlc_player.is_playing():
+            self.vlc_player.pause()
+        else:
+            self.vlc_player.play()
+
+    def pause(self):
+        self.vlc_player.pause()
+
+    def stop(self):
+        self.vlc_player.stop()
+
+    def prev_channel(self):
+        current_row = self.channel_list.currentRow()
+        if current_row > 0:
+            self.channel_list.setCurrentRow(current_row - 1)
+            self.play_channel(self.channel_list.item(current_row - 1))
+
+    def next_channel(self):
+        current_row = self.channel_list.currentRow()
+        if current_row < self.channel_list.count() - 1:
+            self.channel_list.setCurrentRow(current_row + 1)
+            self.play_channel(self.channel_list.item(current_row + 1))
+
+    def toggle_fullscreen(self):
+        is_fullscreen = self.vlc_player.get_fullscreen()
+        self.vlc_player.set_fullscreen(not is_fullscreen)
+
+    def update_time_labels(self, *args):
+        elapsed_time = self.vlc_player.get_time() // 1000
+        remaining_time = (self.vlc_player.get_length() - self.vlc_player.get_time()) // 1000
+
+        elapsed_minutes, elapsed_seconds = divmod(elapsed_time, 60)
+        remaining_minutes, remaining_seconds = divmod(remaining_time, 60)
+
+        self.elapsed_time_label.setText(f'{elapsed_minutes:02d}:{elapsed_seconds:02d}')
+        self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
+
+        # Update the progress bar value
+        self.progress_bar.setValue(int((elapsed_time / (elapsed_time + remaining_time)) * 1000))
+
+        if self.vlc_player.get_state() == vlc.State.Ended:
+            self.progress_bar.setValue(0)
+            self.elapsed_time_label.setText('00:00')
+            self.remaining_time_label.setText('-00:00')
+
+
+    def update_volume_percentage(self, value):
+        self.volume_percentage.setText(f"{value}%")
+        self.vlc_player.audio_set_volume(value)
+
+    def closeEvent(self, event):
+        self.vlc_player.stop()
+        self.epg_update_timer.stop()
+        self.save_settings()
+        super().closeEvent(event)
+
+    def set_volume(self, value):
+        self.vlc_player.audio_set_volume(value)
+        self.volume_percentage.setText(f"{value}%")
+
+    def seek(self, value):
+        self.vlc_player.set_fullscreen(False)
+        self.vlc_player.set_time(int(value * self.vlc_player.get_length() / 1000))
+
 
 
 if __name__ == '__main__':

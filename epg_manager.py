@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from PyQt5.QtCore import QTimer
+import locale
 
 
 class EPGManager:
@@ -102,3 +103,45 @@ class EPGManager:
         self.epg_url = epg_url
         if self.epg_url:
             self.load_epg_from_url(self.epg_url)
+
+    def get_all_programs(self, tvg_id):
+        if tvg_id not in self.epg_data:
+            return None
+
+        return self.epg_data[tvg_id]['programs']
+
+    def get_current_next_all_programs(self, channel_id):
+        now = datetime.utcnow()
+        current_program = None
+        next_program = None
+        all_programs = []
+
+        if channel_id in self.epg_data:
+            for program in self.epg_data[channel_id]['programs']:
+                all_programs.append(program)
+                if program['start_time'].replace(tzinfo=None) <= now <= program['end_time'].replace(tzinfo=None):
+                    current_program = program
+                elif program['start_time'].replace(tzinfo=None) > now:
+                    if next_program is None:
+                        next_program = program
+                    
+
+        formatted_programs = []
+        dates = []
+        for program in all_programs:
+            date_string = str(program['start_time'].replace(tzinfo=None)).split(' ')[0]
+            # Set the locale to Turkish
+            locale.setlocale(locale.LC_TIME, 'tr_TR.UTF-8')
+            # Convert the date string to a datetime object
+            date_obj = datetime.strptime(date_string, '%Y-%m-%d')
+            # Convert the datetime object to the Turkish long date format
+            turkish_long_date = date_obj.strftime('%d %B %A')
+            if turkish_long_date not in dates:
+                dates.append(turkish_long_date)
+                formatted_programs.append(f'\n{turkish_long_date}')
+            formatted_program = f"{str(program['start_time'].replace(tzinfo=None)).split(' ')[-1]} - {str(program['end_time'].replace(tzinfo=None)).split(' ')[-1]}: {program['title']}"
+            formatted_programs.append(formatted_program)
+
+        return current_program, next_program, formatted_programs
+
+
