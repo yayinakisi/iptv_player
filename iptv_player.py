@@ -73,54 +73,6 @@ class XtreamDialog(QDialog):
         self.setLayout(layout)
 
 
-class SeekSlider(QSlider):
-    def __init__(self, player, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.player = player
-        self.setTracking(False)
-        
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            value = self.pixelPosToRangeValue(event.pos())
-            self.setValue(value)
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton:
-            value = self.pixelPosToRangeValue(event.pos())
-            self.setValue(value)
-            self.player.update_time_labels_while_seeking(value)  # Call the method with the value
-            event.accept()
-
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            value = self.pixelPosToRangeValue(event.pos())
-            self.setValue(value)
-            event.accept()
-
-    def pixelPosToRangeValue(self, pos):
-        opt = QStyleOptionSlider()
-        self.initStyleOption(opt)
-        gr = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
-        sr = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
-
-        if self.orientation() == Qt.Horizontal:
-            slider_length = sr.width()
-            slider_min = gr.x()
-            slider_max = gr.right() - slider_length + 1
-        else:
-            slider_length = sr.height()
-            slider_min = gr.y()
-            slider_max = gr.bottom() - slider_length + 1
-
-        pr = pos - sr.center() + sr.topLeft()
-        p = pr.x() if self.orientation() == Qt.Horizontal else pr.y()
-        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), p - slider_min, slider_max - slider_min, opt.upsideDown)
-
-
-
 class IPTVPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -155,6 +107,8 @@ class IPTVPlayer(QMainWindow):
         quit_action = QAction('Quit', self)
         quit_action.triggered.connect(self.close)
         menu_bar.addAction(quit_action)
+
+
 
         # Add clock to the menu bar
         current_time = QTimeEdit(QTime.currentTime())
@@ -259,43 +213,25 @@ class IPTVPlayer(QMainWindow):
         next_channel_button.clicked.connect(self.next_channel)
         controls_layout.addWidget(next_channel_button)
 
+        self.remaining_time_label = QLabel()
+        self.remaining_time_label.setAlignment(Qt.AlignRight)
+        self.remaining_time_label.setText("-00:00")
+        controls_layout.addWidget(self.remaining_time_label)
         self.elapsed_time_label = QLabel('00:00')
         self.elapsed_time_label.setFont(QFont("Arial", 12))
         controls_layout.addWidget(self.elapsed_time_label)
 
-        self.positionSlider = SeekSlider(self, orientation=Qt.Horizontal)
-        self.positionSlider.sliderReleased.connect(self.set_media_position)
-        self.positionSlider.sliderReleased.connect(self.set_media_position)
-        self.positionSlider.sliderMoved.connect(self.update_time_labels)
-        self.positionSlider.sliderMoved.connect(self.slider_moved)
+        self.position_slider = QSlider(Qt.Horizontal)
+        self.position_slider.setRange(0, 1000)
+        self.position_slider.sliderMoved.connect(self.seek)
+        controls_layout.addWidget(self.position_slider)
 
 
-
-        self.progress_bar = SeekSlider(Qt.Horizontal)
-        self.progress_bar.setFixedHeight(32)
-        controls_layout.addWidget(self.progress_bar)
-        self.progress_bar.sliderMoved.connect(self.seek)
-
-        self.remaining_time_label = QLabel('-00:00')
-        self.remaining_time_label.setFont(QFont("Arial", 12))
-        controls_layout.addWidget(self.remaining_time_label)
 
         # Fullscreen toggle button
         self.fullscreen_button = QPushButton("Toggle Fullscreen", self)
         controls_layout.addWidget(self.fullscreen_button)
         self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
-
-        # elapsed_time_label = QLabel('00:00')
-        # elapsed_time_label.setFont(QFont("Arial", 12))
-        # controls_layout.addWidget(elapsed_time_label)
-
-        # progress_bar = QSlider(Qt.Horizontal)
-        # progress_bar.setFixedHeight(32)
-        # controls_layout.addWidget(progress_bar)
-
-        # remaining_time_label = QLabel('-00:00')
-        # remaining_time_label.setFont(QFont("Arial", 12))
-        # controls_layout.addWidget(remaining_time_label)
 
         volume_label = QLabel('Vol:')
         volume_label.setFont(QFont("Arial", 12))
@@ -526,10 +462,10 @@ class IPTVPlayer(QMainWindow):
         self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
 
         # Update the progress bar value
-        self.progress_bar.setValue(int((elapsed_time / (elapsed_time + remaining_time)) * 1000))
+        self.position_slider.setValue(int((elapsed_time / (self.vlc_player.get_length() // 1000)) * 1000))
 
         if self.vlc_player.get_state() == vlc.State.Ended:
-            self.progress_bar.setValue(0)
+            self.position_slider.setValue(0)
             self.elapsed_time_label.setText('00:00')
             self.remaining_time_label.setText('-00:00')
 
@@ -551,9 +487,7 @@ class IPTVPlayer(QMainWindow):
     def seek(self, value):
         self.vlc_player.set_fullscreen(False)
         self.vlc_player.set_time(int(value * self.vlc_player.get_length() / 1000))
-
-    def set_media_position(self, value):
-        self.instance.vlc_player.set_time(int(value * self.instance.vlc_player.get_length() / 1000))
+        self.update_time_labels_while_seeking(value)
 
     def slider_moved(self, value):
         length = self.vlc_player.get_length()
@@ -567,14 +501,17 @@ class IPTVPlayer(QMainWindow):
         self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
 
     def update_time_labels_while_seeking(self, value):
-        elapsed_time = int(value * self.vlc_player.get_length() / 1000)
-        remaining_time = self.vlc_player.get_length() // 1000 - elapsed_time
+        elapsed_time = int(value * self.vlc_player.get_length() / 100)
+        remaining_time = self.vlc_player.get_length() - elapsed_time
 
-        elapsed_minutes, elapsed_seconds = divmod(elapsed_time, 60)
-        remaining_minutes, remaining_seconds = divmod(remaining_time, 60)
-
+        elapsed_minutes = elapsed_time // 60000
+        elapsed_seconds = (elapsed_time % 60000) // 1000
         self.elapsed_time_label.setText(f'{elapsed_minutes:02d}:{elapsed_seconds:02d}')
+
+        remaining_minutes = remaining_time // 60000
+        remaining_seconds = (remaining_time % 60000) // 1000
         self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
+
 
 
 
