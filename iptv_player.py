@@ -226,6 +226,9 @@ class IPTVPlayer(QMainWindow):
         self.position_slider.sliderMoved.connect(self.seek)
         controls_layout.addWidget(self.position_slider)
 
+        self.position_update_timer = QTimer(self)
+        self.position_update_timer.timeout.connect(self.update_position_slider)
+        self.position_update_timer.start(1000)
 
 
         # Fullscreen toggle button
@@ -489,28 +492,34 @@ class IPTVPlayer(QMainWindow):
         self.vlc_player.set_time(int(value * self.vlc_player.get_length() / 1000))
         self.update_time_labels_while_seeking(value)
 
-    def slider_moved(self, value):
-        length = self.vlc_player.get_length()
-        elapsed_time = int(value * length / 1000)
-        remaining_time = length - elapsed_time
+    def update_position_slider(self):
+        media = self.vlc_player.get_media()
+        if media is not None:
+            media_duration = media.get_duration()
+            if media_duration > 0:
+                position = int(self.vlc_player.get_time() * 100 / media_duration)
+                self.position_slider.setValue(position)
 
-        elapsed_minutes, elapsed_seconds = divmod(elapsed_time // 1000, 60)
-        remaining_minutes, remaining_seconds = divmod(remaining_time // 1000, 60)
 
-        self.elapsed_time_label.setText(f'{elapsed_minutes:02d}:{elapsed_seconds:02d}')
-        self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
 
     def update_time_labels_while_seeking(self, value):
-        elapsed_time = int(value * self.vlc_player.get_length() / 100)
-        remaining_time = self.vlc_player.get_length() - elapsed_time
+        media = self.vlc_player.get_media()
+        if media is not None:
+            media_duration = media.get_duration()
+            elapsed_time = int(value * media_duration / 100)
+            remaining_time = media_duration - elapsed_time
 
-        elapsed_minutes = elapsed_time // 60000
-        elapsed_seconds = (elapsed_time % 60000) // 1000
-        self.elapsed_time_label.setText(f'{elapsed_minutes:02d}:{elapsed_seconds:02d}')
+            elapsed_minutes = elapsed_time // 60000
+            elapsed_seconds = (elapsed_time % 60000) // 1000
+            self.elapsed_time_label.setText(f'{elapsed_minutes:02d}:{elapsed_seconds:02d}')
 
-        remaining_minutes = remaining_time // 60000
-        remaining_seconds = (remaining_time % 60000) // 1000
-        self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
+            remaining_minutes = remaining_time // 60000
+            remaining_seconds = (remaining_time % 60000) // 1000
+            self.remaining_time_label.setText(f'-{remaining_minutes:02d}:{remaining_seconds:02d}')
+
+
+
+
 
 
 
