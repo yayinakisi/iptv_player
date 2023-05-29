@@ -289,12 +289,12 @@ class IPTVPlayer(QMainWindow):
         result = xtream_dialog.exec_()
 
         if result == QDialog.Accepted:
-            username = xtream_dialog.username.text()
-            password = xtream_dialog.password.text()
-            server_url = xtream_dialog.server_url.text()
+            username = "M6JRJyi6"#xtream_dialog.username.text()
+            password = "i8h2wUXX"#xtream_dialog.password.text()
+            server_url = "http://epgxtream.xyz"#xtream_dialog.server_url.text()
 
             # Call the load_xtream function from the playlist_manager.py
-            self.playlist_manager.load_xtream(username, password, server_url)
+            self.playlist_manager.load_xtream(server_url, username, password)
             # You may also want to update the GUI after loading the Xtream data
             self.update_gui()
 

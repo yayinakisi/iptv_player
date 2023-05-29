@@ -76,7 +76,8 @@ class PlaylistManager:
         channels = []
         categories_dict = {}  # Create a dictionary to store categories
 
-        for line in m3u_content.splitlines():
+        lines = m3u_content.splitlines()
+        for ind, line in enumerate(lines):
             line = line.strip()
 
             if line.startswith("#EXTM3U"):
@@ -91,6 +92,8 @@ class PlaylistManager:
 
                 if group_match:
                     current_group = group_match.group(1)
+                else:
+                    current_group = lines[ind+1].split(":")[-1]
                     # Add the group to the dictionary if it's not already there
                     if current_group not in categories_dict:
                         categories_dict[current_group] = []
@@ -175,7 +178,7 @@ class PlaylistManager:
             for category in live_categories:
                 category_id = category.get("category_id")
                 category_name = category.get("category_name")
-                categories.append({"id": category_id, "name": category_name, "type": "live"})
+                
 
                 # Get live channels for this category
                 live_channels_url = f"{server_url}/player_api.php?username={username}&password={password}&action=get_live_streams&category_id={category_id}&output=json"
@@ -191,6 +194,7 @@ class PlaylistManager:
                         "category_id": category_id
                     }
                     channels.append(channel_info)
+                    categories.append({"id": category_id, "name": category_name, "type": "live", "channels": channel_info})
 
             # Process VOD categories
             for category in vod_categories:
