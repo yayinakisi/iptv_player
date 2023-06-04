@@ -69,19 +69,61 @@ class XtreamDialog(QDialog):
         layout.addRow(button_box)
         self.setLayout(layout)
 
+class ControlBar(QWidget):
+    def __init__(self, player, parent=None):
+        super().__init__(parent)
+        self.player = player
+
+        # Create the play/pause button
+        self.play_button = QPushButton('Play')
+        self.play_button.clicked.connect(self.play_pause)
+
+        # Create the stop button
+        self.stop_button = QPushButton('Stop')
+        self.stop_button.clicked.connect(self.player.stop)
+
+        # Create the volume slider
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(self.player.audio_get_volume())
+        self.volume_slider.valueChanged.connect(self.player.audio_set_volume)
+
+        # Add the buttons and slider to a layout
+        layout = QHBoxLayout()
+        layout.addWidget(self.play_button)
+        layout.addWidget(self.stop_button)
+        layout.addWidget(self.volume_slider)
+        self.setLayout(layout)
+
+    def play_pause(self):
+        if self.player.is_playing():
+            self.player.pause()
+            self.play_button.setText('Play')
+        else:
+            self.player.play()
+            self.play_button.setText('Pause')
+
+
 class FullScreenWindow(QMainWindow):
     closing = pyqtSignal()
-    def __init__(self, media=None):
-        super().__init__()
 
+    def __init__(self, main_window, media=None):
+        super().__init__()
+        self.main_window = main_window
         self.vlc_instance = vlc.Instance('--no-xlib')
         self.vlc_player = self.vlc_instance.media_player_new()
 
+        # Create a central widget
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         video_frame = QFrame()
         layout.addWidget(video_frame)
+
+        # Create the control bar
+        self.control_bar = ControlBar(self.vlc_player)
+        self.control_bar.hide()  # Start with the control bar hidden
+        layout.addWidget(self.control_bar)
 
         # Tell the VLC player to render into the video frame
         self.vlc_player.set_hwnd(int(video_frame.winId()))
@@ -91,14 +133,32 @@ class FullScreenWindow(QMainWindow):
             self.vlc_player.set_media(media)
             self.vlc_player.play()
 
+        # Show the control bar when the mouse is moved
+        self.setMouseTracking(True)
         self.showFullScreen()
+
+    def mouseMoveEvent(self, event):
+        # Show the control bar at the bottom of the screen
+        self.control_bar.move(0, self.height() - self.control_bar.height())
+        self.control_bar.show()
+        # Set a timer to hide the control bar after 3 seconds
+        QTimer.singleShot(3000, self.control_bar.hide)
+
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
             self.close()
 
     def closeEvent(self, event):
-        self.closing.emit()  # emit the signal when closing
+        # Stop the fullscreen player
+        self.vlc_player.stop()
+        # Get the current media from the fullscreen player
+        media = self.vlc_player.get_media()
+        # Set the media back to the main player
+        self.main_window.vlc_player.set_media(media)
+        # Play the video in the main player
+        self.main_window.vlc_player.play()
+        # Proceed with closing the fullscreen window
         super().closeEvent(event)
 
 
@@ -373,7 +433,7 @@ class IPTVPlayer(QMainWindow):
     def enter_fullscreen(self):
         if self.fullscreen_window is None:
             media = self.vlc_player.get_media()
-            self.fullscreen_window = FullScreenWindow(media)
+            self.fullscreen_window = FullScreenWindow(self, media)
             self.fullscreen_window.setParent(self)  # Set IPTVPlayer as the parent of FullScreenWindow
             self.vlc_player.stop()
 
@@ -499,24 +559,21 @@ class IPTVPlayer(QMainWindow):
         media = self.vlc_instance.media_new(channel["url"])
         self.vlc_player.set_media(media)
         self.vlc_player.play()
-        
         # Tell the VLC player to render into the player label
         self.vlc_player.set_hwnd(int(self.player_label.winId()))
-
         # Connect the endReached signal to the update_time_labels method
         self.vlc_player.event_manager().event_attach(vlc.EventType.MediaPlayerEndReached, self.update_time_labels)
-        if self.fullscreen_window is None:
-            self.fullscreen_window = FullScreenWindow(self.vlc_player.get_media())
-            
-        self.fullscreen_window.closing.connect(self.on_fullscreen_window_closing)  # Connect to the closing signal here
-
+        if self.fullscreen_window is not None:
+            self.on_fullscreen_window_closing()
         # Update EPG data
         self.update_epg_data(channel)
+
 
     def on_fullscreen_window_closing(self):
         # Here, set the media back to the main player and play
         self.vlc_player.set_media(self.fullscreen_window.vlc_player.get_media())
         self.vlc_player.play()
+
 
     def update_epg_data(self, channel):
         if not channel or "tvg_id" not in channel:
@@ -587,9 +644,18 @@ class IPTVPlayer(QMainWindow):
 
     def toggle_fullscreen(self):
         if self.fullscreen_window is None:
-            self.enter_fullscreen()  # This method would be similar to your fullscreen_mode method
+            # Move the video to fullscreen
+            self.vlc_player.set_fullscreen(True)
+            # Create the fullscreen window with the same media
+            self.fullscreen_window = FullScreenWindow(self, self.vlc_player.get_media())
         else:
-            self.exit_fullscreen()
+            # Move the video back to the main window
+            self.vlc_player.set_fullscreen(False)
+            self.on_fullscreen_window_closing()
+            # Set fullscreen_window to None after exiting fullscreen
+            self.fullscreen_window = None
+
+
 
 
     def fullscreen_mode(self):
@@ -599,7 +665,7 @@ class IPTVPlayer(QMainWindow):
             # Pause the current player
             self.vlc_player.pause()
             # Create the fullscreen window with the same media
-            self.fullscreen_window = FullScreenWindow(media)
+            self.fullscreen_window = FullScreenWindow(self, media)
 
 
     def update_time_labels(self, *args):
