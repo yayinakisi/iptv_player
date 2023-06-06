@@ -92,9 +92,10 @@ class PlaylistManager:
 
                 if group_match:
                     current_group = group_match.group(1)
-                else:
-                    current_group = lines[ind+1].split(":")[-1]
-                    # Add the group to the dictionary if it's not already there
+                #this breaks loading m3u from file and url. #EXGRP
+                # else:
+                #     current_group = lines[ind+1].split(":")[-1]
+                #     # Add the group to the dictionary if it's not already there
                     if current_group not in categories_dict:
                         categories_dict[current_group] = []
 

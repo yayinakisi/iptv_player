@@ -26,7 +26,9 @@ class EPGManager:
             response = requests.get(epg_url)
             if response.status_code == 200:
                 epg_content = response.text
+                print("EPG downloaded")
                 self.parse_epg(epg_content)
+                print("EPG loaded")
             else:
                 print(f"Error loading EPG from URL: {epg_url}. Status code: {response.status_code}")
                 return False
@@ -93,11 +95,12 @@ class EPGManager:
         if self.epg_url:
             self.load_epg_from_url(self.epg_url)
 
-        if self.auto_epg_update_interval > 0:
-            QTimer.singleShot(
-                int(self.auto_epg_update_interval * 1000),
-                lambda: self.update_epg(self.epg_url, self.auto_epg_update_interval)
-            )
+        # below code makes trouble and keeps update continuoesly
+        # if self.auto_epg_update_interval > 0:
+        #     QTimer.singleShot(
+        #         int(self.auto_epg_update_interval * 1000),
+        #         lambda: self.update_epg(self.epg_url, self.auto_epg_update_interval)
+        #     )
 
     def load_epg(self, epg_url):
         self.epg_url = epg_url
@@ -110,8 +113,21 @@ class EPGManager:
 
         return self.epg_data[tvg_id]['programs']
 
+    def to_turkish_date(self, date_obj):
+        # Maps for month and weekday names
+        months = {1: 'Ocak', 2: 'Şubat', 3: 'Mart', 4: 'Nisan', 5: 'Mayıs', 6: 'Haziran', 7: 'Temmuz', 8: 'Ağustos', 9: 'Eylül', 10: 'Ekim', 11: 'Kasım', 12: 'Aralık'}
+        weekdays = {0: 'Pazartesi', 1: 'Salı', 2: 'Çarşamba', 3: 'Perşembe', 4: 'Cuma', 5: 'Cumartesi', 6: 'Pazar'}
+
+        # Get the day, month, and weekday from the date object
+        day = date_obj.day
+        month = months[date_obj.month]
+        weekday = weekdays[date_obj.weekday()]
+
+        # Return the formatted string
+        return f'{day} {month} {weekday}'
+
     def get_current_next_all_programs(self, channel_id):
-        now = datetime.utcnow()
+        now = datetime.now()
         current_program = None
         next_program = None
         all_programs = []
@@ -135,13 +151,13 @@ class EPGManager:
             # Convert the date string to a datetime object
             date_obj = datetime.strptime(date_string, '%Y-%m-%d')
             # Convert the datetime object to the Turkish long date format
-            turkish_long_date = date_obj.strftime('%d %B %A')
+            # turkish_long_date = date_obj.strftime('%d %B %A')
+            turkish_long_date = self.to_turkish_date(date_obj)
             if turkish_long_date not in dates:
                 dates.append(turkish_long_date)
                 formatted_programs.append(f'\n{turkish_long_date}')
             formatted_program = f"{str(program['start_time'].replace(tzinfo=None)).split(' ')[-1]} - {str(program['end_time'].replace(tzinfo=None)).split(' ')[-1]}: {program['title']}"
             formatted_programs.append(formatted_program)
-
         return current_program, next_program, formatted_programs
 
 
